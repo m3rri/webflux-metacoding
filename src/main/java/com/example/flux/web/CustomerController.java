@@ -2,20 +2,27 @@ package com.example.flux.web;
 
 import com.example.flux.domain.Customer;
 import com.example.flux.domain.CustomerRepository;
-import lombok.RequiredArgsConstructor;
 import org.springframework.http.MediaType;
+import org.springframework.http.codec.ServerSentEvent;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RestController;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
+import reactor.core.publisher.Sinks;
 
 import java.time.Duration;
 
-@RequiredArgsConstructor
 @RestController
 public class CustomerController {
     private final CustomerRepository customerRepository;
+    private final Sinks.Many<Customer> sinkCustomer;//many 방식이 unicast, multicast(새로 push되는 데이터를 받음), 또 다른거 있음
+
+    public CustomerController(CustomerRepository customerRepository){
+        this.customerRepository= customerRepository;
+        this.sinkCustomer = Sinks.many().multicast().onBackpressureBuffer();
+    }
 
     @GetMapping("/flux")
     public Flux<Integer> flux(){
@@ -48,5 +55,21 @@ public class CustomerController {
     public Mono<Customer> findById(@PathVariable Long id){
         //1건의 데이터를 받는다 = onNext 한번으로 요청이 끝난다.
         return customerRepository.findById(id).log();
+    }
+
+    //@GetMapping(value = "/customers/sse", produces = MediaType.TEXT_EVENT_STREAM_VALUE) //요놈이 표준이다
+    @GetMapping("/customers/sse") //요놈이 표준이다
+    public Flux<ServerSentEvent<Customer>> findAllSSE(){
+        return sinkCustomer
+                .asFlux()
+                .map(customer-> ServerSentEvent.builder(customer).build())//js에서는 EventSource라는 인터페이스 사용해서 구독할 수 있다.
+                .doOnCancel(()-> sinkCustomer.asFlux().blockLast());
+    }
+
+    @PostMapping("/customer")
+    public Mono<Customer> save(String firstName, String lastName){
+        return customerRepository
+                .save(new Customer(firstName, lastName))
+                .doOnNext(customer->sinkCustomer.tryEmitNext(customer));
     }
 }
