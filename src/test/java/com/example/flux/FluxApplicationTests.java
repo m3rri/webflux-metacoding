@@ -9,5 +9,4 @@ class FluxApplicationTests {
 	@Test
 	void contextLoads() {
 	}
-
 }
